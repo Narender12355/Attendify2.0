@@ -59,9 +59,9 @@ Logo: `public/college-logo.webp` is used in the app and PWA. The Android launche
 
 ## 4. Publish on GitHub Pages
 
-Push this project to a GitHub repository on the `main` or `master` branch. In the repository settings, set **Pages > Build and deployment > Source** to **GitHub Actions**. Add these repository secrets under **Settings > Secrets and variables > Actions** using the values from your Firebase web app: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, and `VITE_FIREBASE_APP_ID`.
+Push this project to a GitHub repository on the `main` or `master` branch. In the repository settings, set **Pages > Build and deployment > Source** to **GitHub Actions**. Add these under **Settings > Secrets and variables > Actions** using the values from your Firebase web app: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, and `VITE_FIREBASE_APP_ID`. They can be Actions secrets or variables; Firebase web configuration is included in the public client bundle either way.
 
-The workflow in `.github/workflows/deploy-pages.yml` deploys the site on each push. The public URL is shown in the workflow run and under **Settings > Pages**. Firebase web configuration is included in the client bundle; protect the service with Firebase Authentication and Firestore security rules, not by treating these values as server-side secrets.
+The workflow in `.github/workflows/deploy-pages.yml` deploys the site on each push. It fails before deployment and lists any missing Firebase settings. After adding them, rerun the workflow (or push another commit) to rebuild the app. The public URL is shown in the workflow run and under **Settings > Pages**. Protect the service with Firebase Authentication and Firestore security rules, not by treating these values as server-side secrets.
 
 ### No Android Studio? Use the web app as an installable app
 

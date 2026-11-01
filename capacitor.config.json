@@ -1,0 +1,6 @@
+{
+  "appId": "com.attendify.app",
+  "appName": "Attendify",
+  "webDir": "dist",
+  "backgroundColor": "#06080d"
+}

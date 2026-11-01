@@ -1,0 +1,136 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function profilePath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function isMember() { return signedIn() && exists(profilePath()); }
+    function isTeacher() { return isMember() && get(profilePath()).data.role == 'teacher'; }
+    function isManagement() { return isMember() && get(profilePath()).data.role == 'management'; }
+    function validBranches(branches) {
+      return branches is list
+        && branches.size() > 0
+        && branches.hasOnly(['CE', 'AI', 'ECE', 'EE', 'ME', 'FA', 'TT', 'TC', 'OTHER']);
+    }
+    function validYears(years) {
+      return years is list && years.size() > 0 && years.hasOnly(['1', '2', '3', '4']);
+    }
+    function validSemesters(semesters) {
+      return semesters is list && semesters.size() > 0
+        && semesters.hasOnly(['1', '2', '3', '4', '5', '6', '7', '8']);
+    }
+    function validTeacherAssignment(profile) {
+      return validBranches(profile.branches)
+        && validYears(profile.years)
+        && validSemesters(profile.semesters)
+        && profile.semesters.size() == profile.years.size() * 2
+        && (profile.years.hasAny(['1']) == (profile.semesters.hasAny(['1']) && profile.semesters.hasAny(['2'])))
+        && (profile.years.hasAny(['2']) == (profile.semesters.hasAny(['3']) && profile.semesters.hasAny(['4'])))
+        && (profile.years.hasAny(['3']) == (profile.semesters.hasAny(['5']) && profile.semesters.hasAny(['6'])))
+        && (profile.years.hasAny(['4']) == (profile.semesters.hasAny(['7']) && profile.semesters.hasAny(['8'])));
+    }
+    function isAssignedTeacher() {
+      return isTeacher() && validTeacherAssignment(get(profilePath()).data);
+    }
+    function teacherBranches() { return get(profilePath()).data.branches; }
+    function teacherSemesters() { return get(profilePath()).data.semesters; }
+    function teacherHasBranch(branch) {
+      return isAssignedTeacher() && teacherBranches().hasAny([branch]);
+    }
+    function teacherHasSemester(semester) {
+      return isAssignedTeacher() && teacherSemesters().hasAny([semester]);
+    }
+    function teacherHasClass(branch, semester) {
+      return teacherHasBranch(branch) && teacherHasSemester(semester);
+    }
+    function teacherOwnsStudent(userId) {
+      return isAssignedTeacher()
+        && get(/databases/$(database)/documents/users/$(userId)).data.role == 'student'
+        && teacherHasClass(
+          get(/databases/$(database)/documents/users/$(userId)).data.branch,
+          get(/databases/$(database)/documents/users/$(userId)).data.semester
+        );
+    }
+    function teacherOwnsSubject(subjectId) {
+      return teacherHasClass(
+        get(/databases/$(database)/documents/subjects/$(subjectId)).data.branch,
+        get(/databases/$(database)/documents/subjects/$(subjectId)).data.semester
+      );
+    }
+    function teacherOwnsTimetable(id) {
+      let parts = id.split('_');
+      return isAssignedTeacher() && parts.size() == 2 && teacherHasClass(parts[1], parts[0]);
+    }
+
+    // Management provisions teachers and students; teachers only access assigned classes.
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isManagement()
+        || (resource.data.role == 'student' && teacherHasClass(resource.data.branch, resource.data.semester)));
+      allow create: if isManagement() && (
+          (request.resource.data.role == 'student'
+            && request.resource.data.branch in ['CE', 'AI', 'ECE', 'EE', 'ME', 'FA', 'TT', 'TC', 'OTHER']
+            && request.resource.data.semester in ['1', '2', '3', '4', '5', '6', '7', '8'])
+          || (request.resource.data.role == 'teacher' && validTeacherAssignment(request.resource.data))
+        ) || (request.auth.uid == userId
+          && request.resource.data.role == 'management'
+          && exists(/databases/$(database)/documents/config/management)
+          && request.resource.data.inviteCode.matches('^[0-9]{4}$')
+          && request.resource.data.inviteCode == get(/databases/$(database)/documents/config/management).data.code);
+      allow update: if isManagement() && (
+          (resource.data.role == 'student'
+            && request.resource.data.role == 'student'
+            && request.resource.data.branch in ['CE', 'AI', 'ECE', 'EE', 'ME', 'FA', 'TT', 'TC', 'OTHER']
+            && request.resource.data.semester in ['1', '2', '3', '4', '5', '6', '7', '8'])
+          || (resource.data.role == 'teacher'
+            && request.resource.data.role == 'teacher'
+            && validTeacherAssignment(request.resource.data))
+        );
+      allow delete: if isManagement() && resource.data.role != 'management';
+    }
+
+    // Secret settings: never readable from the app. Rules read them internally.
+    match /config/{docId} { allow read, write: if false; }
+
+    // Students read academic data; teachers are restricted to assigned branches and semesters.
+    match /subjects/{id} {
+      allow read: if isMember() && (!isTeacher() || teacherHasClass(resource.data.branch, resource.data.semester));
+      allow create: if isManagement() || teacherHasClass(request.resource.data.branch, request.resource.data.semester);
+      allow update: if isManagement() || (teacherOwnsSubject(id)
+        && teacherHasClass(request.resource.data.branch, request.resource.data.semester));
+      allow delete: if isManagement() || teacherOwnsSubject(id);
+    }
+    match /syllabus/{id} {
+      allow read: if isMember() && (!isTeacher() || teacherOwnsSubject(id));
+      allow create, update: if isManagement() || teacherOwnsSubject(id);
+      allow delete: if isManagement() || teacherOwnsSubject(id);
+    }
+    match /timetable/{id} {
+      allow read: if isMember() && (!isTeacher() || teacherOwnsTimetable(id));
+      allow create, update, delete: if isManagement() || teacherOwnsTimetable(id);
+    }
+    match /events/{id} {
+      allow read: if isMember() && (!isTeacher() || teacherHasClass(resource.data.branch, resource.data.semester));
+      allow create: if isManagement() || teacherHasClass(request.resource.data.branch, request.resource.data.semester);
+      allow update: if isManagement() || (teacherHasClass(resource.data.branch, resource.data.semester)
+        && teacherHasClass(request.resource.data.branch, request.resource.data.semester));
+      allow delete: if isManagement() || teacherHasClass(resource.data.branch, resource.data.semester);
+    }
+
+    // Attendance: one document per student per class. Students read only their own.
+    match /attendance/{id} {
+      allow read: if isManagement() || teacherHasClass(resource.data.branch, resource.data.semester)
+        || (isMember() && resource.data.studentId == request.auth.uid);
+      allow create: if isManagement() || teacherHasClass(request.resource.data.branch, request.resource.data.semester);
+      allow update: if isManagement() || (teacherHasClass(resource.data.branch, resource.data.semester)
+        && teacherHasClass(request.resource.data.branch, request.resource.data.semester));
+      allow delete: if isManagement() || teacherHasClass(resource.data.branch, resource.data.semester);
+    }
+
+    // Syllabus progress: each student edits their own; teachers only read their branch.
+    match /progress/{userId} {
+      allow read: if isMember() && (request.auth.uid == userId || isManagement() || teacherOwnsStudent(userId));
+      allow create, update: if isMember() && request.auth.uid == userId;
+      allow delete: if isManagement();
+    }
+  }
+}

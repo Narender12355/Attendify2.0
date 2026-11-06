@@ -41,7 +41,7 @@ Requirements: Node 18+, JDK 17, Android Studio (installs the Android SDK).
 npm run build
 npx cap add android          # first time only
 npm run android:sync
-npm run android:open         # opens Android Studio
+npm run android:open        # opens Android Studio
 ```
 
 In Android Studio: **Build > Build Bundle(s) / APK(s) > Build APK(s)**. The file appears at
